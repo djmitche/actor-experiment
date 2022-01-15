@@ -15,6 +15,8 @@ TODO:
  * stop mailbox
  * define actor spawn as Type { .. }.spawn
  * timer mailbox
+ * stream mailbox
+ * canned actor to map over a stream, later in parallel
 
 Pipeline TODO:
  * Commitment trait? mailbox?

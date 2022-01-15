@@ -3,10 +3,27 @@ use async_trait::async_trait;
 use tokio::time;
 
 const FLUSH_INTERVAL: time::Duration = time::Duration::from_millis(100);
+const MAX_BYTES_IN_FLIGHT: usize = 15;
+
+/// Representation of the commitment of bytes up until this position.
+#[derive(Debug, Clone, Copy)]
+struct BytesCommitment(usize);
+
+impl BytesCommitment {
+    fn update(self, later: Self) -> Self {
+        later
+    }
+}
 
 struct Tailer {
+    /// Input that we are tailing
     input: Inbox<u8>,
-    output: Outbox<Vec<u8>>,
+
+    /// Buffered output
+    output: Outbox<(Vec<u8>, BytesCommitment)>,
+
+    /// Commitments of buffers.
+    commitments: Inbox<BytesCommitment>,
 
     /// current buffer of not-yet-sent bytes
     buf: Vec<u8>,
@@ -22,10 +39,15 @@ struct Tailer {
 }
 
 impl Tailer {
-    fn new(input: Inbox<u8>, output: Outbox<Vec<u8>>) -> Self {
+    fn new(
+        input: Inbox<u8>,
+        output: Outbox<(Vec<u8>, BytesCommitment)>,
+        commitments: Inbox<BytesCommitment>,
+    ) -> Self {
         Tailer {
             input,
             output,
+            commitments,
             buf: vec![],
             flush_at: None,
             read: 0,
@@ -45,7 +67,11 @@ impl Tailer {
         if self.buf.len() > 0 {
             let buf = std::mem::take(&mut self.buf);
             self.flush_at = None;
-            self.output.tx.send(buf).await.unwrap();
+            self.output
+                .tx
+                .send((buf, BytesCommitment(self.read)))
+                .await
+                .unwrap();
         }
     }
 }
@@ -53,6 +79,7 @@ impl Tailer {
 #[async_trait]
 impl Actor for Tailer {
     async fn run(mut self) {
+        let mut reading = true;
         loop {
             // time::sleep(..) call is evaluated even if the condition
             // is false, so we must provide an actual non-negative duration.
@@ -69,21 +96,32 @@ impl Actor for Tailer {
                 _ = time::sleep(until_flush), if self.flush_at.is_some() => {
                     self.flush().await;
                 },
-                rx = self.input.rx.recv() => {
+                rx = self.commitments.rx.recv() => {
+                    if let Some(comm) = rx {
+                        self.committed = comm.0;
+                    } else {
+                        panic!("downstream actor failed");
+                    }
+                },
+                rx = self.input.rx.recv(), if reading && self.read - self.committed < MAX_BYTES_IN_FLIGHT => {
                     if let Some(c) = rx {
                         self.read_byte(c);
                     } else {
                         self.flush().await;
-                        break;
+                        reading = false;
                     }
                 },
+            }
+            if !reading && self.committed == self.read {
+                break;
             }
         }
     }
 }
 
 struct Consumer {
-    input: Inbox<Vec<u8>>,
+    input: Inbox<(Vec<u8>, BytesCommitment)>,
+    commits: Outbox<BytesCommitment>,
 }
 
 #[async_trait]
@@ -92,8 +130,14 @@ impl Actor for Consumer {
         loop {
             tokio::select! {
                 rx = self.input.rx.recv() => {
-                    if let Some(v) = rx {
+                    if let Some((v, comm)) = rx {
                         println!("GOT {:?}", v);
+                        let tx = self.commits.tx.clone();
+                        tokio::spawn(async move {
+                            time::sleep(time::Duration::from_millis(300)).await;
+                            println!("ACK {:?}", v);
+                            tx.send(comm).await.unwrap();
+                        });
                     } else {
                         break
                     }
@@ -107,19 +151,20 @@ impl Actor for Consumer {
 async fn producer_consumer() {
     let (out_bytes, in_bytes) = Mailbox::new().split();
     let (out_bufs, in_bufs) = Mailbox::new().split();
-    let mut t = Tailer::spawn(Tailer::new(in_bytes, out_bufs));
-    let mut c = Consumer::spawn(Consumer { input: in_bufs });
+    let (out_comms, in_comms) = Mailbox::new().split();
+    let mut t = Tailer::spawn(Tailer::new(in_bytes, out_bufs, in_comms));
+    let mut c = Consumer::spawn(Consumer {
+        input: in_bufs,
+        commits: out_comms,
+    });
 
     for b in b"abcdefghijklmnopqrabcdefghijklmnopqrabcdefghijklmnopqrsssabcdefghijklmnopqrs" {
         out_bytes.tx.send(*b).await.unwrap();
         time::sleep(time::Duration::from_millis(10)).await;
     }
 
-    time::sleep(time::Duration::from_secs(3)).await;
     drop(out_bytes);
 
     t.stopped().await.unwrap();
     c.stopped().await.unwrap();
-
-    assert!(false);
 }
