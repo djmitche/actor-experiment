@@ -1,4 +1,5 @@
-use ::actor::*;
+use actor::mailbox::{Inbox, Outbox, Simple};
+use actor::Actor;
 use async_trait::async_trait;
 use std::sync::{Arc, Mutex};
 
@@ -48,7 +49,7 @@ struct Main;
 impl Actor for Main {
     async fn run(self) {
         let result = Arc::new(Mutex::new(Vec::new()));
-        let (outbox, inbox) = Mailbox::new().split();
+        let (outbox, inbox) = Simple::new().split();
         let mut p = Producer::spawn(Producer {
             outbox,
             data: vec![1, 2, 3, 4],

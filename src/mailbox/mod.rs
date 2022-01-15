@@ -1,5 +1,5 @@
-mod mailbox;
 mod oneshot;
+mod simple;
 
-pub use mailbox::*;
 pub use oneshot::*;
+pub use simple::*;

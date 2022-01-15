@@ -1,15 +1,15 @@
 use tokio::sync::mpsc;
 
 #[derive(Debug)]
-pub struct Mailbox<T: Sync + Send + 'static> {
+pub struct Simple<T: Sync + Send + 'static> {
     tx: mpsc::Sender<T>,
     rx: mpsc::Receiver<T>,
 }
 
-impl<T: Sync + Send + 'static> Mailbox<T> {
+impl<T: Sync + Send + 'static> Simple<T> {
     pub fn new() -> Self {
         let (tx, rx) = mpsc::channel(1);
-        Mailbox { tx, rx }
+        Simple { tx, rx }
     }
 
     pub fn split(self) -> (Outbox<T>, Inbox<T>) {

@@ -1,4 +1,5 @@
-use ::actor::*;
+use actor::mailbox::{Inbox, Outbox, Simple};
+use actor::Actor;
 use async_trait::async_trait;
 use tokio::time;
 
@@ -149,9 +150,9 @@ impl Actor for Consumer {
 
 #[tokio::test]
 async fn producer_consumer() {
-    let (out_bytes, in_bytes) = Mailbox::new().split();
-    let (out_bufs, in_bufs) = Mailbox::new().split();
-    let (out_comms, in_comms) = Mailbox::new().split();
+    let (out_bytes, in_bytes) = Simple::new().split();
+    let (out_bufs, in_bufs) = Simple::new().split();
+    let (out_comms, in_comms) = Simple::new().split();
     let mut t = Tailer::spawn(Tailer::new(in_bytes, out_bufs, in_comms));
     let mut c = Consumer::spawn(Consumer {
         input: in_bufs,
