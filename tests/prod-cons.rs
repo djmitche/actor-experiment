@@ -1,19 +1,6 @@
-#![allow(dead_code)]
-#![allow(unused_imports)]
+use ::actor::*;
 use async_trait::async_trait;
-use std::collections::HashMap;
-use std::marker::PhantomData;
-use std::sync::{Arc, Mutex, MutexGuard};
-use tokio::sync::{mpsc, oneshot};
-use tokio::task::JoinHandle;
-
-mod actor;
-mod mailbox;
-
-use actor::*;
-use mailbox::*;
-
-// ---
+use std::sync::{Arc, Mutex};
 
 struct Producer {
     outbox: Outbox<u8>,
@@ -33,6 +20,7 @@ impl Actor for Producer {
 
 struct Consumer {
     inbox: Inbox<u8>,
+    result: Arc<Mutex<Vec<Option<u8>>>>,
 }
 
 #[async_trait]
@@ -41,10 +29,10 @@ impl Actor for Consumer {
         loop {
             tokio::select! {
                 Some(msg) = self.inbox.rx.recv() => {
-                    println!("GOT {}", msg);
+                    self.result.lock().unwrap().push(Some(msg));
                 }
                 else => {
-                    println!("consumer complete");
+                    self.result.lock().unwrap().push(None);
                     break;
                 }
             }
@@ -59,20 +47,29 @@ struct Main;
 #[async_trait]
 impl Actor for Main {
     async fn run(self) {
+        let result = Arc::new(Mutex::new(Vec::new()));
         let (outbox, inbox) = Mailbox::new().split();
         let mut p = Producer::spawn(Producer {
             outbox,
             data: vec![1, 2, 3, 4],
         });
-        let mut c = Consumer::spawn(Consumer { inbox });
+        let mut c = Consumer::spawn(Consumer {
+            inbox,
+            result: result.clone(),
+        });
 
         p.stopped().await.unwrap();
         c.stopped().await.unwrap();
+
+        assert_eq!(
+            result.lock().unwrap().clone(),
+            vec![Some(1), Some(2), Some(3), Some(4), None]
+        );
     }
 }
 
-#[tokio::main]
-async fn main() {
+#[tokio::test]
+async fn producer_consumer() {
     let mut m = Main::spawn(Main);
     m.stopped().await.unwrap();
 }
