@@ -15,23 +15,7 @@ use mailbox::*;
 
 // ---
 
-/**
- * Thinking:
- *
- *  - an actor _framework_ is hard, esp without dictating an async runtime
- *  - an actor _toolbox_ is different
- *    - pluggable bits: mailboxes, monitoring, telemetry
- *    - patterns: how to write a loop, initialization, ..
- *    - designs: when to use one mailbox or multiple, etc.
- *    - encoded with types, traits, or macros where possible
- *  - shippable as lots of crates, with easy addition by others
- *  - mostly focus on mailboxes
- */
-
-// ---
-
 struct Producer {
-    mon: ChildMonitor,
     outbox: Outbox<u8>,
     data: Vec<u8>,
 }
@@ -48,7 +32,6 @@ impl Actor for Producer {
 // ---
 
 struct Consumer {
-    mon: ChildMonitor,
     inbox: Inbox<u8>,
 }
 
@@ -71,35 +54,25 @@ impl Actor for Consumer {
 
 // ---
 
-struct Main {
-    done: OneshotOutbox<()>,
-}
+struct Main;
 
 #[async_trait]
 impl Actor for Main {
     async fn run(self) {
-        let mut monitor = Monitor::new();
         let (outbox, inbox) = Mailbox::new().split();
-        Producer::spawn(Producer {
-            mon: monitor.child("producer"),
+        let mut p = Producer::spawn(Producer {
             outbox,
             data: vec![1, 2, 3, 4],
         });
-        Consumer::spawn(Consumer {
-            mon: monitor.child("consumer"),
-            inbox,
-        });
+        let mut c = Consumer::spawn(Consumer { inbox });
 
-        monitor.wait("producer").await;
-        monitor.wait("consumer").await;
-
-        self.done.tx.send(()).unwrap();
+        p.stopped().await.unwrap();
+        c.stopped().await.unwrap();
     }
 }
 
 #[tokio::main]
 async fn main() {
-    let (outbox, inbox) = Oneshot::new().split();
-    Main::spawn(Main { done: outbox });
-    inbox.rx.await.unwrap();
+    let mut m = Main::spawn(Main);
+    m.stopped().await.unwrap();
 }
