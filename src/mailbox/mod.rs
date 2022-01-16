@@ -13,7 +13,6 @@
 //! # use actor::mailbox::{simple, Receiver, Sender};
 //! # use actor::Actor;
 //! # use async_trait::async_trait;
-//! # use std::sync::{Arc, Mutex};
 //! struct Producer<Tx: Sender<&'static str>>(Tx);
 //! #[async_trait]
 //! impl<Tx: Sender<&'static str>> Actor for Producer<Tx> {

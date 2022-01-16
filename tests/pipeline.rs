@@ -1,3 +1,4 @@
+use actor::actor::map;
 use actor::mailbox::{simple, MultiSender, Receiver, Sender, Stop, Stopper, Timer};
 use actor::Actor;
 use async_trait::async_trait;
@@ -130,7 +131,7 @@ where
 
 struct Consumer<I, C>
 where
-    I: Receiver<(Vec<u8>, BytesCommitment)>,
+    I: Receiver<(String, BytesCommitment)>,
     C: MultiSender<BytesCommitment>,
 {
     input: I,
@@ -140,7 +141,7 @@ where
 #[async_trait]
 impl<I, C> Actor for Consumer<I, C>
 where
-    I: Receiver<(Vec<u8>, BytesCommitment)>,
+    I: Receiver<(String, BytesCommitment)>,
     C: MultiSender<BytesCommitment>,
 {
     async fn run(mut self) {
@@ -168,11 +169,15 @@ where
 async fn producer_consumer() {
     let (out_bytes, in_bytes) = simple();
     let (out_bufs, in_bufs) = simple();
+    let (out_strs, in_strs) = simple();
     let (mut stopper, stop) = Stopper::new();
     let (out_comms, in_comms) = simple();
     let mut t = Tailer::new(in_bytes, out_bufs, in_comms, stop).spawn();
+    let mut ts = map(in_bufs, out_strs, |(buf, comm)| {
+        (String::from_utf8(buf).unwrap(), comm)
+    });
     let mut c = Consumer {
-        input: in_bufs,
+        input: in_strs,
         commits: out_comms,
     }
     .spawn();
@@ -185,5 +190,6 @@ async fn producer_consumer() {
     stopper.stop();
 
     t.stopped().await.unwrap();
+    ts.stopped().await.unwrap();
     c.stopped().await.unwrap();
 }

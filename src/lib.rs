@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use tokio::sync::watch;
 
+pub mod actor;
 pub mod mailbox;
 
 #[derive(Debug, Clone)]
