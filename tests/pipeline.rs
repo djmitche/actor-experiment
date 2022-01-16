@@ -1,4 +1,4 @@
-use actor::mailbox::{Inbox, Outbox, Simple};
+use actor::mailbox::{simple, stop, MultiSender, Receiver, Sender};
 use actor::Actor;
 use async_trait::async_trait;
 use tokio::time;
@@ -16,15 +16,23 @@ impl BytesCommitment {
     }
 }
 
-struct Tailer {
+struct Tailer<I, O, C>
+where
+    I: Receiver<u8>,
+    O: Sender<(Vec<u8>, BytesCommitment)>,
+    C: Receiver<BytesCommitment>,
+{
     /// Input that we are tailing
-    input: Inbox<u8>,
+    input: I,
 
     /// Buffered output
-    output: Outbox<(Vec<u8>, BytesCommitment)>,
+    output: O,
 
     /// Commitments of buffers.
-    commitments: Inbox<BytesCommitment>,
+    commitments: C,
+
+    /// Stop signal
+    stop: stop::Stop,
 
     /// current buffer of not-yet-sent bytes
     buf: Vec<u8>,
@@ -39,16 +47,18 @@ struct Tailer {
     committed: usize,
 }
 
-impl Tailer {
-    fn new(
-        input: Inbox<u8>,
-        output: Outbox<(Vec<u8>, BytesCommitment)>,
-        commitments: Inbox<BytesCommitment>,
-    ) -> Self {
+impl<I, O, C> Tailer<I, O, C>
+where
+    I: Receiver<u8>,
+    O: Sender<(Vec<u8>, BytesCommitment)>,
+    C: Receiver<BytesCommitment>,
+{
+    fn new(input: I, output: O, commitments: C, stop: stop::Stop) -> Self {
         Tailer {
             input,
             output,
             commitments,
+            stop,
             buf: vec![],
             flush_at: None,
             read: 0,
@@ -69,7 +79,6 @@ impl Tailer {
             let buf = std::mem::take(&mut self.buf);
             self.flush_at = None;
             self.output
-                .tx
                 .send((buf, BytesCommitment(self.read)))
                 .await
                 .unwrap();
@@ -78,9 +87,14 @@ impl Tailer {
 }
 
 #[async_trait]
-impl Actor for Tailer {
+impl<I, O, C> Actor for Tailer<I, O, C>
+where
+    I: Receiver<u8>,
+    O: Sender<(Vec<u8>, BytesCommitment)>,
+    C: Receiver<BytesCommitment>,
+{
     async fn run(mut self) {
-        let mut reading = true;
+        let mut stopping = false;
         loop {
             // time::sleep(..) call is evaluated even if the condition
             // is false, so we must provide an actual non-negative duration.
@@ -97,47 +111,60 @@ impl Actor for Tailer {
                 _ = time::sleep(until_flush), if self.flush_at.is_some() => {
                     self.flush().await;
                 },
-                rx = self.commitments.rx.recv() => {
+                rx = self.commitments.recv() => {
                     if let Some(comm) = rx {
                         self.committed = comm.0;
                     } else {
                         panic!("downstream actor failed");
                     }
                 },
-                rx = self.input.rx.recv(), if reading && self.read - self.committed < MAX_BYTES_IN_FLIGHT => {
+                rx = self.input.recv(), if !stopping && self.read - self.committed < MAX_BYTES_IN_FLIGHT => {
                     if let Some(c) = rx {
                         self.read_byte(c);
                     } else {
                         self.flush().await;
-                        reading = false;
+                        // stop if the input channel closes
+                        stopping = true;
                     }
                 },
+                _ = self.stop.recv(), if !stopping => {
+                    // stop if requested (even if the input channel remains open)
+                    stopping = true;
+                }
             }
-            if !reading && self.committed == self.read {
+            if stopping && self.committed == self.read {
                 break;
             }
         }
     }
 }
 
-struct Consumer {
-    input: Inbox<(Vec<u8>, BytesCommitment)>,
-    commits: Outbox<BytesCommitment>,
+struct Consumer<I, C>
+where
+    I: Receiver<(Vec<u8>, BytesCommitment)>,
+    C: MultiSender<BytesCommitment>,
+{
+    input: I,
+    commits: C,
 }
 
 #[async_trait]
-impl Actor for Consumer {
+impl<I, C> Actor for Consumer<I, C>
+where
+    I: Receiver<(Vec<u8>, BytesCommitment)>,
+    C: MultiSender<BytesCommitment>,
+{
     async fn run(mut self) {
         loop {
             tokio::select! {
-                rx = self.input.rx.recv() => {
+                rx = self.input.recv() => {
                     if let Some((v, comm)) = rx {
                         println!("GOT {:?}", v);
-                        let tx = self.commits.tx.clone();
+                        let sender = self.commits.clone();
                         tokio::spawn(async move {
                             time::sleep(time::Duration::from_millis(300)).await;
                             println!("ACK {:?}", v);
-                            tx.send(comm).await.unwrap();
+                            sender.send(comm).await.unwrap();
                         });
                     } else {
                         break
@@ -150,21 +177,22 @@ impl Actor for Consumer {
 
 #[tokio::test]
 async fn producer_consumer() {
-    let (out_bytes, in_bytes) = Simple::new().split();
-    let (out_bufs, in_bufs) = Simple::new().split();
-    let (out_comms, in_comms) = Simple::new().split();
-    let mut t = Tailer::spawn(Tailer::new(in_bytes, out_bufs, in_comms));
+    let (out_bytes, in_bytes) = simple::new();
+    let (out_bufs, in_bufs) = simple::new();
+    let (mut stopper, stop) = stop::new();
+    let (out_comms, in_comms) = simple::new();
+    let mut t = Tailer::spawn(Tailer::new(in_bytes, out_bufs, in_comms, stop));
     let mut c = Consumer::spawn(Consumer {
         input: in_bufs,
         commits: out_comms,
     });
 
     for b in b"abcdefghijklmnopqrabcdefghijklmnopqrabcdefghijklmnopqrsssabcdefghijklmnopqrs" {
-        out_bytes.tx.send(*b).await.unwrap();
+        out_bytes.send(*b).await.unwrap();
         time::sleep(time::Duration::from_millis(10)).await;
     }
 
-    drop(out_bytes);
+    stopper.stop();
 
     t.stopped().await.unwrap();
     c.stopped().await.unwrap();

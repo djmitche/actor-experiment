@@ -10,11 +10,9 @@ Thinking:
  * mostly focus on mailboxes
 
 TODO:
- * allow await'ing mailboxes directly
- * watch-based "condition" mailbox (can await to see new values)
- * stop mailbox
- * define actor spawn as Type { .. }.spawn
  * timer mailbox
+ * watch-based "condition" mailbox (can await to see new values)
+ * define actor spawn as Type { .. }.spawn
  * stream mailbox
  * canned actor to map over a stream, later in parallel
 
@@ -22,3 +20,6 @@ Pipeline TODO:
  * Commitment trait? mailbox?
  * Need more stages to be interesting?
  * switch to Bytes
+
+Polish TODO:
+ * use a better error wrapper that doesn't require Debug on T everywhere

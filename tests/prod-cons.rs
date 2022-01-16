@@ -1,35 +1,35 @@
-use actor::mailbox::{Inbox, Outbox, Simple};
+use actor::mailbox::{simple, Receiver, Sender};
 use actor::Actor;
 use async_trait::async_trait;
 use std::sync::{Arc, Mutex};
 
-struct Producer {
-    outbox: Outbox<u8>,
+struct Producer<Tx: Sender<u8>> {
+    outbox: Tx,
     data: Vec<u8>,
 }
 
 #[async_trait]
-impl Actor for Producer {
+impl<Tx: Sender<u8>> Actor for Producer<Tx> {
     async fn run(self) {
         for byte in self.data {
-            self.outbox.tx.send(byte).await.unwrap()
+            self.outbox.send(byte).await.unwrap()
         }
     }
 }
 
 // ---
 
-struct Consumer {
-    inbox: Inbox<u8>,
+struct Consumer<Rx: Receiver<u8>> {
+    inbox: Rx,
     result: Arc<Mutex<Vec<Option<u8>>>>,
 }
 
 #[async_trait]
-impl Actor for Consumer {
+impl<Rx: Receiver<u8>> Actor for Consumer<Rx> {
     async fn run(mut self) {
         loop {
             tokio::select! {
-                Some(msg) = self.inbox.rx.recv() => {
+                Some(msg) = self.inbox.recv() => {
                     self.result.lock().unwrap().push(Some(msg));
                 }
                 else => {
@@ -49,7 +49,7 @@ struct Main;
 impl Actor for Main {
     async fn run(self) {
         let result = Arc::new(Mutex::new(Vec::new()));
-        let (outbox, inbox) = Simple::new().split();
+        let (outbox, inbox) = simple::new();
         let mut p = Producer::spawn(Producer {
             outbox,
             data: vec![1, 2, 3, 4],
