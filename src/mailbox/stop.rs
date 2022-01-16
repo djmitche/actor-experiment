@@ -1,16 +1,15 @@
 use tokio::sync::oneshot;
 
-/// Create a new "stop" mailbox.  This provides a simple way to send a "stop" message to
-/// an actor.
+/// A Stopper provides a way to send a stop signal to a single actor.
 ///
 /// # Example
 ///
 /// ```
 /// # use tokio::time::{sleep, Duration};
-/// # use actor::mailbox::stop;
+/// # use actor::mailbox::Stopper;
 /// # #[tokio::test]
 /// # async fn select_stop() {
-/// let (mut stopper, mut stop) = stop::new();
+/// let (mut stopper, mut stop) = Stopper::new();
 /// let task = tokio::spawn(async move {
 ///     let mut stopping = false;
 ///     loop {
@@ -33,17 +32,17 @@ use tokio::sync::oneshot;
 /// task.await.unwrap();
 /// # }
 /// ```
-pub fn new() -> (Stopper, Stop) {
-    let (tx, rx) = oneshot::channel();
-    (Stopper { tx: Some(tx) }, Stop { rx })
-}
-
 #[derive(Debug)]
 pub struct Stopper {
     tx: Option<oneshot::Sender<()>>,
 }
 
 impl Stopper {
+    pub fn new() -> (Stopper, Stop) {
+        let (tx, rx) = oneshot::channel();
+        (Stopper { tx: Some(tx) }, Stop { rx })
+    }
+
     /// Send a stop signal to the actor.  Calls after the first do nothing.  If the actor has
     /// already stopped, nothing happens.
     pub fn stop(&mut self) {
@@ -54,6 +53,7 @@ impl Stopper {
     }
 }
 
+/// Stop is the receiver counterpart to [`Stopper`].
 #[derive(Debug)]
 pub struct Stop {
     rx: oneshot::Receiver<()>,
@@ -75,7 +75,7 @@ mod test {
 
     #[tokio::test]
     async fn start_and_stop() {
-        let (mut stopper, mut stop) = new();
+        let (mut stopper, mut stop) = Stopper::new();
         let task = tokio::spawn(async move { stop.recv().await });
         stopper.stop();
         task.await.unwrap();
@@ -83,7 +83,7 @@ mod test {
 
     #[tokio::test]
     async fn stop_twice() {
-        let (mut stopper, mut stop) = new();
+        let (mut stopper, mut stop) = Stopper::new();
         let task = tokio::spawn(async move { stop.recv().await });
         stopper.stop();
         stopper.stop();
@@ -92,7 +92,7 @@ mod test {
 
     #[tokio::test]
     async fn stopper_dropped() {
-        let (stopper, mut stop) = new();
+        let (stopper, mut stop) = Stopper::new();
         let task = tokio::spawn(async move { stop.recv().await });
         drop(stopper);
         task.await.unwrap();

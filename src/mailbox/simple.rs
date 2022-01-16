@@ -2,10 +2,11 @@ use crate::mailbox;
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 
-/// Create a new simple mailbox, represented as a sender and a receiver.
+/// Create a new simple mailbox, represented as a sender and a receiver.  Simple mailboxes
+/// wrap an MPSC (multiple-producer, single-consumer) channel and carry messages of type T.
 ///
 /// The sender can be cloned.  Once all senders have been dropped, the receiver will receiv None.
-pub fn new<T: std::fmt::Debug + Sync + Send + 'static>(
+pub fn simple<T: std::fmt::Debug + Sync + Send + 'static>(
 ) -> (impl mailbox::MultiSender<T>, impl mailbox::Receiver<T>) {
     let (tx, rx) = mpsc::channel(1);
     (Sender { tx }, Receiver { rx })
@@ -50,7 +51,7 @@ mod test {
 
     #[tokio::test]
     async fn send_stuff() -> anyhow::Result<()> {
-        let (tx, mut rx) = new();
+        let (tx, mut rx) = simple();
         tokio::spawn(async move {
             tx.send("hello").await.unwrap();
             tx.send("world").await.unwrap();

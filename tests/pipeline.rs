@@ -1,4 +1,4 @@
-use actor::mailbox::{simple, stop, timer, MultiSender, Receiver, Sender};
+use actor::mailbox::{simple, MultiSender, Receiver, Sender, Stop, Stopper, Timer};
 use actor::Actor;
 use async_trait::async_trait;
 use tokio::time;
@@ -32,10 +32,10 @@ where
     commitments: C,
 
     /// Stop signal
-    stop: stop::Stop,
+    stop: Stop,
 
     /// Timer for flushing
-    flush_timer: timer::Timer,
+    flush_timer: Timer,
 
     /// current buffer of not-yet-sent bytes
     buf: Vec<u8>,
@@ -53,13 +53,13 @@ where
     O: Sender<(Vec<u8>, BytesCommitment)>,
     C: Receiver<BytesCommitment>,
 {
-    fn new(input: I, output: O, commitments: C, stop: stop::Stop) -> Self {
+    fn new(input: I, output: O, commitments: C, stop: Stop) -> Self {
         Tailer {
             input,
             output,
             commitments,
             stop,
-            flush_timer: timer::new(),
+            flush_timer: Timer::new(),
             buf: vec![],
             read: 0,
             committed: 0,
@@ -166,10 +166,10 @@ where
 
 #[tokio::test]
 async fn producer_consumer() {
-    let (out_bytes, in_bytes) = simple::new();
-    let (out_bufs, in_bufs) = simple::new();
-    let (mut stopper, stop) = stop::new();
-    let (out_comms, in_comms) = simple::new();
+    let (out_bytes, in_bytes) = simple();
+    let (out_bufs, in_bufs) = simple();
+    let (mut stopper, stop) = Stopper::new();
+    let (out_comms, in_comms) = simple();
     let mut t = Tailer::new(in_bytes, out_bufs, in_comms, stop).spawn();
     let mut c = Consumer {
         input: in_bufs,
