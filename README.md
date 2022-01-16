@@ -12,7 +12,6 @@ Thinking:
 TODO:
  * timer mailbox
  * watch-based "condition" mailbox (can await to see new values)
- * define actor spawn as Type { .. }.spawn
  * stream mailbox
  * canned actor to map over a stream, later in parallel
 

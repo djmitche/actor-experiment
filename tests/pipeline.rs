@@ -181,11 +181,12 @@ async fn producer_consumer() {
     let (out_bufs, in_bufs) = simple::new();
     let (mut stopper, stop) = stop::new();
     let (out_comms, in_comms) = simple::new();
-    let mut t = Tailer::spawn(Tailer::new(in_bytes, out_bufs, in_comms, stop));
-    let mut c = Consumer::spawn(Consumer {
+    let mut t = Tailer::new(in_bytes, out_bufs, in_comms, stop).spawn();
+    let mut c = Consumer {
         input: in_bufs,
         commits: out_comms,
-    });
+    }
+    .spawn();
 
     for b in b"abcdefghijklmnopqrabcdefghijklmnopqrabcdefghijklmnopqrsssabcdefghijklmnopqrs" {
         out_bytes.send(*b).await.unwrap();

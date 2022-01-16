@@ -50,14 +50,16 @@ impl Actor for Main {
     async fn run(self) {
         let result = Arc::new(Mutex::new(Vec::new()));
         let (outbox, inbox) = simple::new();
-        let mut p = Producer::spawn(Producer {
+        let mut p = Producer {
             outbox,
             data: vec![1, 2, 3, 4],
-        });
-        let mut c = Consumer::spawn(Consumer {
+        }
+        .spawn();
+        let mut c = Consumer {
             inbox,
             result: result.clone(),
-        });
+        }
+        .spawn();
 
         p.stopped().await.unwrap();
         c.stopped().await.unwrap();
