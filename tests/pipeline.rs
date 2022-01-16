@@ -1,4 +1,4 @@
-use actor::mailbox::{simple, stop, MultiSender, Receiver, Sender};
+use actor::mailbox::{simple, stop, timer, MultiSender, Receiver, Sender};
 use actor::Actor;
 use async_trait::async_trait;
 use tokio::time;
@@ -34,11 +34,11 @@ where
     /// Stop signal
     stop: stop::Stop,
 
+    /// Timer for flushing
+    flush_timer: timer::Timer,
+
     /// current buffer of not-yet-sent bytes
     buf: Vec<u8>,
-
-    /// Time at which this buffer should be flushed
-    flush_at: Option<time::Instant>,
 
     /// total number of bytes read
     read: usize,
@@ -59,8 +59,8 @@ where
             output,
             commitments,
             stop,
+            flush_timer: timer::new(),
             buf: vec![],
-            flush_at: None,
             read: 0,
             committed: 0,
         }
@@ -68,8 +68,8 @@ where
 
     fn read_byte(&mut self, c: u8) {
         self.read += 1;
-        if self.flush_at.is_none() {
-            self.flush_at = Some(time::Instant::now() + FLUSH_INTERVAL);
+        if self.buf.len() == 0 {
+            self.flush_timer.set(time::Instant::now() + FLUSH_INTERVAL);
         }
         self.buf.push(c);
     }
@@ -77,7 +77,7 @@ where
     async fn flush(&mut self) {
         if self.buf.len() > 0 {
             let buf = std::mem::take(&mut self.buf);
-            self.flush_at = None;
+            self.flush_timer.clear();
             self.output
                 .send((buf, BytesCommitment(self.read)))
                 .await
@@ -96,21 +96,7 @@ where
     async fn run(mut self) {
         let mut stopping = false;
         loop {
-            // time::sleep(..) call is evaluated even if the condition
-            // is false, so we must provide an actual non-negative duration.
-            let now = time::Instant::now();
-            let wake_at = self
-                .flush_at
-                .unwrap_or(time::Instant::now() + time::Duration::from_millis(100));
-            let until_flush = if wake_at < now {
-                time::Duration::ZERO
-            } else {
-                wake_at - now
-            };
             tokio::select! {
-                _ = time::sleep(until_flush), if self.flush_at.is_some() => {
-                    self.flush().await;
-                },
                 rx = self.commitments.recv() => {
                     if let Some(comm) = rx {
                         self.committed = comm.0;
@@ -126,6 +112,9 @@ where
                         // stop if the input channel closes
                         stopping = true;
                     }
+                },
+                _ = self.flush_timer.recv(), if self.buf.len() > 0 => {
+                    self.flush().await;
                 },
                 _ = self.stop.recv(), if !stopping => {
                     // stop if requested (even if the input channel remains open)

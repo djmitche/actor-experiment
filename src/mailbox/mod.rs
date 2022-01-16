@@ -2,6 +2,7 @@ use async_trait::async_trait;
 
 pub mod simple;
 pub mod stop;
+pub mod timer;
 
 /// A Receiver allows consumption of incoming messages.  Typically a receiver will be used as input
 /// by a single actor.

@@ -10,7 +10,6 @@ Thinking:
  * mostly focus on mailboxes
 
 TODO:
- * timer mailbox
  * watch-based "condition" mailbox (can await to see new values)
  * stream mailbox
  * canned actor to map over a stream, later in parallel
